@@ -141,7 +141,7 @@ function setupReceiverTransform(receiver) {
   }, [readable, writable]);
 }
 
-function call() {
+async function call() {
   callButton.disabled = true;
   hangupButton.disabled = false;
   console.log('Starting call');
@@ -154,14 +154,14 @@ function call() {
     videoMonitor.srcObject = e.streams[0];
   });
   startToMiddle.pc1.getSenders().forEach(setupSenderTransform);
-  startToMiddle.negotiate();
+  await startToMiddle.negotiate();
 
   startToEnd = new VideoPipe(localStream, true, true, e => {
     setupReceiverTransform(e.receiver);
     gotRemoteStream(e.streams[0]);
   });
   startToEnd.pc1.getSenders().forEach(setupSenderTransform);
-  startToEnd.negotiate();
+  await startToEnd.negotiate();
 
   console.log('Video pipes created');
 }
