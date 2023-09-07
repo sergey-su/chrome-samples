@@ -52,6 +52,27 @@ VideoPipe.prototype.negotiate = async function() {
   this.pc2.onicecandidate = e => this.pc1.addIceCandidate(e.candidate);
 
   const offer = await this.pc1.createOffer();
+  let newSdp = "";
+  for (let line of offer.sdp.split('\r\n')) {
+    if (line.startsWith("m=video")) {
+      newSdp += `${line.replace(' 96', ' 41 96')}\r\n`;
+      continue;
+    }
+    if (line.startsWith('a=rtpmap:96 VP8/90000')) {
+      newSdp += `a=rtpmap:41 VP8/90000
+a=packetization:41 raw
+a=rtcp-fb:41 goog-remb
+a=rtcp-fb:41 transport-cc
+a=rtcp-fb:41 ccm fir
+a=rtcp-fb:41 nack
+a=rtcp-fb:41 nack pli
+`;
+    }
+    if (line != '') {
+      newSdp += `${line}\r\n`;
+    }
+  }
+  offer.sdp = newSdp;
   await this.pc2.setRemoteDescription({type: 'offer', sdp: offer.sdp.replace('red/90000', 'green/90000')});
   await this.pc1.setLocalDescription(offer);
 
