@@ -43,9 +43,6 @@
         <video id="video1" playsinline autoplay muted></video>
         <video id="video2" playsinline autoplay></video>
       </div>
-      <br>
-      Crypto key: <input type="text" id="crypto-key">
-      Encrypt first bytes: <input type="checkbox" id="crypto-offset">
     </p>
     <p>
       <h2>Middlebox</h2>
@@ -72,6 +69,15 @@
 <script src="js/main.js" async></script>
 
 <script src="../../../js/lib/ga.js"></script>
+
+<p>
+  <input id="audio_metadata_size" value="0" />
+  <button onclick="setPayloadSize('audio_metadata_size', 'audio')">Set audio payload size</button>
+</p>
+<p>
+  <input id="video_metadata_size" value="0" />
+  <button onclick="setPayloadSize('video_metadata_size', 'video')">Set video payload size</button>
+</p>
 
 </body>
 </html>

@@ -26,6 +26,42 @@
 // eslint-disable-next-line prefer-const
 let preferredVideoCodecMimeType = 'video/VP8';
 
+function mungeSdp(sdp) {
+  let newSdp = "";
+  let ddAdded = false;
+  let videoMLine = false;
+  let packetizationAdded = false;
+  let match;
+  for (let line of sdp.split('\r\n')) {
+    if (line.startsWith("m=video")) {
+      videoMLine = true;
+      newSdp += `${line}\r\n`;
+    } else if (line.startsWith("m=audio")) {
+      videoMLine = false;
+      newSdp += `${line}\r\n`;
+    } else if (videoMLine && /^a=extmap:\d+/.exec(line) && !ddAdded) {
+      ddAdded = true;
+      newSdp += `a=extmap:9 https://aomediacodec.github.io/av1-rtp-spec/#dependency-descriptor-rtp-header-extension
+${line}
+`;
+    } else if (videoMLine && (match = /^a=rtpmap:(\d+) VP8\/90000/.exec(line)) && !packetizationAdded) {
+      packetizationAdded = true;
+      newSdp += `${line}
+a=packetization:${match[1]} raw
+`;
+    } else if (line != '') {
+      newSdp += `${line}\r\n`;
+    }
+  }
+  if (!ddAdded) {
+    throw new Error('Failed to add dependency descriptor');
+  }
+  if (!packetizationAdded) {
+    throw new Error('Failed to add packetizatio');
+  }
+  return newSdp;
+}
+
 function VideoPipe(stream, forceSend, forceReceive, handler) {
   this.pc1 = new RTCPeerConnection({
     encodedInsertableStreams: forceSend,
@@ -52,10 +88,12 @@ VideoPipe.prototype.negotiate = async function() {
   this.pc2.onicecandidate = e => this.pc1.addIceCandidate(e.candidate);
 
   const offer = await this.pc1.createOffer();
+  offer.sdp = mungeSdp(offer.sdp);
   await this.pc2.setRemoteDescription({type: 'offer', sdp: offer.sdp.replace('red/90000', 'green/90000')});
   await this.pc1.setLocalDescription(offer);
 
   const answer = await this.pc2.createAnswer();
+  answer.sdp = mungeSdp(answer.sdp);
   await this.pc1.setRemoteDescription(answer);
   await this.pc2.setLocalDescription(answer);
 };

@@ -12,26 +12,8 @@
  */
 
 'use strict';
-let currentCryptoKey;
-let useCryptoOffset = true;
-let currentKeyIdentifier = 0;
-
-// If using crypto offset (controlled by a checkbox):
-// Do not encrypt the first couple of bytes of the payload. This allows
-// a middle to determine video keyframes or the opus mode being used.
-// For VP8 this is the content described in
-//   https://tools.ietf.org/html/rfc6386#section-9.1
-// which is 10 bytes for key frames and 3 bytes for delta frames.
-// For opus (where encodedFrame.type is not set) this is the TOC byte from
-//   https://tools.ietf.org/html/rfc6716#section-3.1
-//
-// It makes the (encrypted) video and audio much more fun to watch and listen to
-// as the decoder does not immediately throw a fatal error.
-const frameTypeToCryptoOffset = {
-  key: 10,
-  delta: 3,
-  undefined: 1,
-};
+let audioPayloadSize = 0;
+let videoPayloadSize = 0;
 
 function dump(encodedFrame, direction, max = 16) {
   const data = new Uint8Array(encodedFrame.data);
@@ -53,28 +35,18 @@ function encodeFunction(encodedFrame, controller) {
   if (scount++ < 30) { // dump the first 30 packets.
     dump(encodedFrame, 'send');
   }
-  if (currentCryptoKey) {
-    const view = new DataView(encodedFrame.data);
-    // Any length that is needed can be used for the new buffer.
-    const newData = new ArrayBuffer(encodedFrame.data.byteLength + 5);
-    const newView = new DataView(newData);
+  const metadataSize = ((encodedFrame.type || 'audio') === 'audio')
+    ? audioPayloadSize : videoPayloadSize;
+  const view = new DataView(encodedFrame.data);
+  const newData = new ArrayBuffer(encodedFrame.data.byteLength + 4 + metadataSize);
+  const newView = new DataView(newData);
 
-    const cryptoOffset = useCryptoOffset? frameTypeToCryptoOffset[encodedFrame.type] : 0;
-    for (let i = 0; i < cryptoOffset && i < encodedFrame.data.byteLength; ++i) {
-      newView.setInt8(i, view.getInt8(i));
-    }
-    // This is a bitwise xor of the key with the payload. This is not strong encryption, just a demo.
-    for (let i = cryptoOffset; i < encodedFrame.data.byteLength; ++i) {
-      const keyByte = currentCryptoKey.charCodeAt(i % currentCryptoKey.length);
-      newView.setInt8(i, view.getInt8(i) ^ keyByte);
-    }
-    // Append keyIdentifier.
-    newView.setUint8(encodedFrame.data.byteLength, currentKeyIdentifier % 0xff);
-    // Append checksum
-    newView.setUint32(encodedFrame.data.byteLength + 1, 0xDEADBEEF);
-
-    encodedFrame.data = newData;
+  for (let i = 0; i < encodedFrame.data.byteLength; ++i) {
+    newView.setInt8(i + 4, view.getInt8(i));
   }
+  newView.setUint32(0, encodedFrame.data.byteLength);
+
+  encodedFrame.data = newData;
   controller.enqueue(encodedFrame);
 }
 
@@ -83,34 +55,20 @@ function decodeFunction(encodedFrame, controller) {
   if (rcount++ < 30) { // dump the first 30 packets
     dump(encodedFrame, 'recv');
   }
-  const view = new DataView(encodedFrame.data);
-  const checksum = encodedFrame.data.byteLength > 4 ? view.getUint32(encodedFrame.data.byteLength - 4) : false;
-  if (currentCryptoKey) {
-    if (checksum !== 0xDEADBEEF) {
-      console.log('Corrupted frame received, checksum ' +
-                  checksum.toString(16));
-      return; // This can happen when the key is set and there is an unencrypted frame in-flight.
-    }
-    const keyIdentifier = view.getUint8(encodedFrame.data.byteLength - 5);
-    if (keyIdentifier !== currentKeyIdentifier) {
-      console.log(`Key identifier mismatch, got ${keyIdentifier} expected ${currentKeyIdentifier}.`);
-      return;
+  if (encodedFrame.data.byteLength > 0) {
+    const view = new DataView(encodedFrame.data);
+    const encodedFrameSize = view.getUint32(0);
+    if (rcount % 100 == 0) {
+      console.log('decoding frame ', encodedFrame.type, 'with metadata size',
+        encodedFrame.data.byteLength - encodedFrameSize - 4);
     }
 
-    const newData = new ArrayBuffer(encodedFrame.data.byteLength - 5);
+    const newData = new ArrayBuffer(encodedFrameSize);
     const newView = new DataView(newData);
-    const cryptoOffset = useCryptoOffset? frameTypeToCryptoOffset[encodedFrame.type] : 0;
-
-    for (let i = 0; i < cryptoOffset; ++i) {
-      newView.setInt8(i, view.getInt8(i));
-    }
-    for (let i = cryptoOffset; i < encodedFrame.data.byteLength - 5; ++i) {
-      const keyByte = currentCryptoKey.charCodeAt(i % currentCryptoKey.length);
-      newView.setInt8(i, view.getInt8(i) ^ keyByte);
+    for (let i = 0; i < encodedFrameSize; ++i) {
+      newView.setInt8(i, view.getInt8(4 + i));
     }
     encodedFrame.data = newData;
-  } else if (checksum === 0xDEADBEEF) {
-    return; // encrypted in-flight frame but we already forgot about the key.
   }
   controller.enqueue(encodedFrame);
 }
@@ -139,11 +97,13 @@ onmessage = (event) => {
     return handleTransform(event.data.operation, event.data.readable, event.data.writable);
   }
   if (event.data.operation === 'setCryptoKey') {
-    if (event.data.currentCryptoKey !== currentCryptoKey) {
-      currentKeyIdentifier++;
+  }
+  if (event.data.operation === 'setPayloadSize') {
+    if (event.data.mediaType === 'audio') {
+      audioPayloadSize = event.data.value;
+    } else {
+      videoPayloadSize = event.data.value;
     }
-    currentCryptoKey = event.data.currentCryptoKey;
-    useCryptoOffset = event.data.useCryptoOffset;
   }
 };
 

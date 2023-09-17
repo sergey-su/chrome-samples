@@ -19,8 +19,6 @@ const startButton = document.getElementById('startButton');
 const callButton = document.getElementById('callButton');
 const hangupButton = document.getElementById('hangupButton');
 
-const cryptoKey = document.querySelector('#crypto-key');
-const cryptoOffsetBox = document.querySelector('#crypto-offset');
 const banner = document.querySelector('#banner');
 const muteMiddleBox = document.querySelector('#mute-middlebox');
 
@@ -28,11 +26,8 @@ startButton.onclick = start;
 callButton.onclick = call;
 hangupButton.onclick = hangup;
 
-cryptoKey.addEventListener('change', setCryptoKey);
-cryptoOffsetBox.addEventListener('change', setCryptoKey);
 muteMiddleBox.addEventListener('change', toggleMute);
 
-let startToMiddle;
 let startToEnd;
 
 let localStream;
@@ -141,56 +136,38 @@ function setupReceiverTransform(receiver) {
   }, [readable, writable]);
 }
 
-function call() {
+async function call() {
   callButton.disabled = true;
   hangupButton.disabled = false;
   console.log('Starting call');
-  // The real use case is where the middle box relays the
-  // packets and listens in, but since we don't have
-  // access to raw packets, we just send the same video
-  // to both places.
-  startToMiddle = new VideoPipe(localStream, true, false, e => {
-    // Do not setup the receiver transform.
-    videoMonitor.srcObject = e.streams[0];
-  });
-  startToMiddle.pc1.getSenders().forEach(setupSenderTransform);
-  startToMiddle.negotiate();
 
   startToEnd = new VideoPipe(localStream, true, true, e => {
     setupReceiverTransform(e.receiver);
     gotRemoteStream(e.streams[0]);
   });
   startToEnd.pc1.getSenders().forEach(setupSenderTransform);
-  startToEnd.negotiate();
+  await startToEnd.negotiate();
 
   console.log('Video pipes created');
 }
 
 function hangup() {
   console.log('Ending call');
-  startToMiddle.close();
   startToEnd.close();
   hangupButton.disabled = true;
   callButton.disabled = false;
 }
 
-function setCryptoKey(event) {
-  console.log('Setting crypto key to ' + cryptoKey.value);
-  const currentCryptoKey = cryptoKey.value;
-  const useCryptoOffset = !cryptoOffsetBox.checked;
-  if (currentCryptoKey) {
-    banner.innerText = 'Encryption is ON';
-  } else {
-    banner.innerText = 'Encryption is OFF';
-  }
-  worker.postMessage({
-    operation: 'setCryptoKey',
-    currentCryptoKey,
-    useCryptoOffset,
-  });
-}
-
 function toggleMute(event) {
   video2.muted = muteMiddleBox.checked;
   videoMonitor.muted = !muteMiddleBox.checked;
+}
+
+function setPayloadSize(elementName, mediaType) {
+  const inputElement = document.getElementById(elementName);
+  worker.postMessage({
+    operation: 'setPayloadSize',
+    value: parseInt(inputElement.value),
+    mediaType
+  });
 }
